@@ -40,12 +40,43 @@ from skills.audit_orchestrator.scripts.orchestrator import run_audit
 report = run_audit("https://example.com")
 ```
 
+## How this tool browses the network
+
+This is the key thing your team should understand: **the tool does the browsing, not the person running it.** When you (or your CI pipeline) run the script, the requests go out from *your* machine to the website you're auditing. This is read-only network access — the tool never writes to or changes the target site.
+
+### What does the network layer actually do?
+
+1. **Sends HTTP GET requests.** The crawler (`crawler.py`) uses the Python `requests` library to fetch pages. A GET request is exactly what your browser does when you type a URL — it asks the server for a page and receives the HTML back. The tool never uses POST/PUT/DELETE, never submits forms, and never touches authenticated (logged-in) areas.
+
+2. **Identifies itself.** Every request includes a `User-Agent` header: `"BrandAuditBot/1.0"`. This tells the website "I am an automated auditor" so site operators can distinguish it from a human visitor or from malicious bots.
+
+3. **Downloads then parses.** Once it gets the raw HTML, it parses it with `BeautifulSoup` to read things like the title, meta descriptions, headings, links, images, and structured data — without ever interacting with the page's JavaScript.
+
+4. **Follows internal links.** It reads the links on each page and queues up the ones pointing to the *same domain*, so it can visit a few more relevant pages. By default it visits up to 20 pages, 2 levels deep.
+
+### How it stays safe and polite
+
+| Rule | Why |
+|------|-----|
+| **Read-only (GET only)** | It can never modify the target website |
+| **Respects `robots.txt`** | It reads the site's robots.txt first and will not access any path the site blocks |
+| **Same-domain only** | It never wanders to external sites — it only follows links within the domain being audited |
+| **Delay between requests** | A built-in delay (default 1s) throttles it so it doesn't hammer the server |
+| **Configurable limits** | `max_pages`, `max_depth`, `timeout`, and `delay` caps keep it conservative |
+| **Loop prevention** | Tracks already-visited URLs and drops duplicates (fragments, tracking params like `utm_*`, `index.html`) so it doesn't crawl in circles |
+
+### Where the network access actually happens
+
+The browsing happens **on your machine at runtime** — it is *not* done by an external service or by an AI agent. If you run the orchestrator locally, your machine makes the requests. If you run it in CI/cloud, that machine makes the requests. The only external thing that ever happens is the standard HTTP request sent to, and the response received from, the audited website.
+
 ## Architecture
 
 ```
 URL
  ↓
-Crawl/inspection
+Validate & normalize URL
+ ↓
+Crawl/inspection (read-only HTTP)
  ↓
 Shared audit context
  ↓
@@ -55,7 +86,23 @@ Findings
  ↓
 Orchestrator
  ↓
-Final report
+Final JSON report
+```
+
+### Shared audit context
+
+The most important design decision: all three skills share **one** crawl result instead of each skill re-downloading the website. The orchestrator crawls once, then builds a shared `audit_context` that every skill reads from. This keeps the network load low (one crawl, multiple analyses) and guarantees all skills see the same data.
+
+```json
+{
+  "site": { "input_url", "normalized_url", "final_url", "domain" },
+  "robots": { ... },
+  "sitemap": { ... },
+  "pages": [ ... ],
+  "links": [ ... ],
+  "structured_data": [ ... ],
+  "metadata": [ ... ]
+}
 ```
 
 ### Skills
@@ -114,13 +161,17 @@ pytest tests/
 
 ## Configuration
 
-Default settings are conservative:
-- Max 20 pages
-- Max depth 2
-- 1 second delay between requests
-- 10 second timeout
+Default settings are conservative and directly control how much the tool browses the network:
 
-These can be configured via command line or API.
+| Setting | Default | Controls |
+|---------|---------|----------|
+| `max_pages` | 20 | Max pages fetched over the network |
+| `max_depth` | 2 | How deep it follows internal links |
+| `delay` | 1.0s | Pause between requests (rate limiting) |
+| `timeout` | 10s | How long to wait for each response |
+| `user_agent` | `BrandAuditBot/1.0` | Identifier sent with each request |
+
+These can be configured via command-line flags or the Python API, and they keep the browsing conservative so the audited site is never overwhelmed.
 
 ## License
 
