@@ -173,6 +173,4 @@ Default settings are conservative and directly control how much the tool browses
 
 These can be configured via command-line flags or the Python API, and they keep the browsing conservative so the audited site is never overwhelmed.
 
-## License
-
-Adobe University Hackathon 2026
+## Team Shastra Stack
