@@ -2,7 +2,6 @@
 Single-page crawl-render audit pipeline.
 
 Implements the research flow (README Section 8):
-
   URL -> direct HTTP -> WAF/HTTP gate -> robots.txt policy
       -> raw HTML extraction -> target-fact check -> JSON-LD extraction
       -> browser rendering -> raw vs rendered comparison
@@ -19,7 +18,7 @@ failures become observations plus ACCESS findings.
 """
 
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from http_fetch import fetch_url, origin_of
 from waf_detector import detect_blockade
@@ -34,105 +33,169 @@ from rules import apply_rules
 
 def audit_url(
     url: str,
-    target_facts: Optional[List[Dict]] = None,
+    target_facts: Optional[List[Dict[str, Any]]] = None,
     target_paths: Optional[List[str]] = None,
     render: bool = True,
     http_timeout_s: int = 15,
     robots_timeout_s: int = 15,
     render_timeout_s: int = 25,
-    semantic_match: Optional[Callable[[Dict, str], bool]] = None,
+    semantic_match: Optional[Callable[[Dict[str, Any], str], bool]] = None,
     user_agent: str = "BrandAuditBot/1.0",
-) -> Dict:
-    """Run the layered audit for one URL. Returns {signals, findings, timings}."""
+) -> Dict[str, Any]:
+    """
+    Run the single-page crawl-render audit for one target URL.
+    Returns a dictionary containing raw signals, rule findings, timing breakdowns, and status.
+    """
     t0 = time.time()
     timings: Dict[str, float] = {}
     target_facts = target_facts or []
 
-    # Layer 1: direct HTTP.
+    # Layer 1: Direct HTTP Fetch
     t = time.time()
     http_obs = fetch_url(url, timeout=http_timeout_s, user_agent=user_agent)
     timings["http_s"] = round(time.time() - t, 3)
 
-    # Layer 2: WAF / HTTP gate.
+    # Layer 2: WAF / HTTP Gate Detection
     blockade = detect_blockade(
-        http_obs["status"], http_obs["headers"], http_obs["raw_html"], http_obs["error"]
+        http_obs.get("status", 0),
+        http_obs.get("headers", {}),
+        http_obs.get("raw_html", ""),
+        http_obs.get("error"),
     )
 
-    origin = origin_of(http_obs["url"])
-    # Robots policy (independent layer; always attempted).
+    origin = origin_of(http_obs.get("url") or url)
+
+    # Layer 3: Robots Policy Check (Independent layer, always attempted)
     t = time.time()
     robots_obs = fetch_robots_txt(origin, timeout=robots_timeout_s, user_agent=user_agent)
     timings["robots_s"] = round(time.time() - t, 3)
     ai_access = check_ai_access(robots_obs.get("text", ""), target_paths or ["/"])
 
-    # Sitemap baseline (observation only, best-effort, never a finding).
+    # Layer 4: Sitemap Baseline Check (Best-effort observation, never raises or blocks)
     try:
-        sitemap_obs = discover_and_fetch(robots_obs.get("text", ""), origin, timeout=robots_timeout_s)
+        sitemap_obs = discover_and_fetch(
+            robots_obs.get("text", ""), origin, timeout=robots_timeout_s
+        )
     except Exception:
         sitemap_obs = {"candidate_urls": [], "sitemaps": []}
 
     raw_html = http_obs.get("raw_html", "")
 
-    # Layer 3: raw HTML extraction + pre-render fact check.
+    # Layer 5: Raw HTML Extraction & Pre-render Fact Parsing
     t = time.time()
     raw_text = extract_text(raw_html)
     timings["raw_extract_s"] = round(time.time() - t, 3)
 
-    # Layer 4: JSON-LD fallback.
+    # Layer 6: JSON-LD Fallback & Schema Fact Extraction
     t = time.time()
     jsonld_obs = extract_jsonld_objects(raw_html)
-    flat = flatten_fact_values(jsonld_obs["objects"])
+    flat = flatten_fact_values(jsonld_obs.get("objects", []))
     timings["jsonld_s"] = round(time.time() - t, 3)
 
+    # Layer 7: Browser Client-side Rendering (Playwright Execution)
     rendered_html: Optional[str] = None
-    render_obs: Dict = {"ok": False, "error": "render-skipped"}
-    rendered_text = {"text": "", "word_count": 0, "char_count": 0}
+    render_obs: Dict[str, Any] = {"ok": False, "error": "render-skipped"}
+    rendered_text: Dict[str, Any] = {"text": "", "word_count": 0, "char_count": 0}
+
     if render and not blockade.get("blocked"):
         t = time.time()
-        render_obs = render_url(http_obs.get("final_url") or url,
-                                timeout_s=render_timeout_s, user_agent=user_agent)
+        render_obs = render_url(
+            http_obs.get("final_url") or url,
+            timeout_s=render_timeout_s,
+            user_agent=user_agent,
+        )
         timings["render_s"] = round(time.time() - t, 3)
+
         if render_obs.get("ok"):
             rendered_html = render_obs.get("rendered_html", "")
             rendered_text = extract_text(rendered_html or "")
     elif blockade.get("blocked"):
         render_obs = {"ok": False, "error": "render-skipped-blockade"}
 
-    expansion = expansion_stats(raw_text, rendered_text) if render_obs.get("ok") else {
-        "raw_words": raw_text["word_count"], "rendered_words": None,
-        "abs_gain": None, "pct_gain": None, "screening_triggered": False,
-    }
+    # Expansion calculation (Raw vs Rendered Text Comparison)
+    expansion = (
+        expansion_stats(raw_text, rendered_text)
+        if render_obs.get("ok")
+        else {
+            "raw_words": raw_text["word_count"],
+            "rendered_words": None,
+            "abs_gain": None,
+            "pct_gain": None,
+            "screening_triggered": False,
+        }
+    )
 
-    # Layers 5-6: target-fact comparison across raw / JSON-LD / rendered.
+    # Layer 8: Target-fact Comparison across Raw / JSON-LD / Rendered
     fact_result = compare_facts(
         target_facts,
         raw_text["text"],
-        flat["text_blob"],
+        flat.get("text_blob", ""),
         rendered_text["text"] if render_obs.get("ok") else None,
         semantic_match=semantic_match,
     )
 
-    signals = {
-        "url": http_obs["url"],
+    # Aggregate All Audit Signals
+    signals: Dict[str, Any] = {
+        "url": http_obs.get("url", url),
         "final_url": http_obs.get("final_url"),
-        "http_status": http_obs["status"],
+        "http_status": http_obs.get("status", 0),
         "blockade": blockade,
         "ai_access": ai_access,
-        "robots_available": robots_obs.get("available"),
-        "sitemap": {"candidates": sitemap_obs.get("candidate_urls", []),
-                    "fetched": len(sitemap_obs.get("sitemaps", []))},
-        "raw": {"word_count": raw_text["word_count"], "char_count": raw_text["char_count"]},
-        "rendered": {"word_count": rendered_text["word_count"],
-                     "char_count": rendered_text["char_count"]} if render_obs.get("ok") else None,
+        "robots_available": robots_obs.get("available", False),
+        "sitemap": {
+            "candidates": sitemap_obs.get("candidate_urls", []),
+            "fetched": len(sitemap_obs.get("sitemaps", [])),
+        },
+        "raw": {
+            "word_count": raw_text.get("word_count", 0),
+            "char_count": raw_text.get("char_count", 0),
+        },
+        "rendered": (
+            {
+                "word_count": rendered_text.get("word_count", 0),
+                "char_count": rendered_text.get("char_count", 0),
+            }
+            if render_obs.get("ok")
+            else None
+        ),
         "render_ok": bool(render_obs.get("ok")),
         "render_error": render_obs.get("error"),
         "expansion": expansion,
-        "jsonld": {"objects_count": len(jsonld_obs["objects"]),
-                   "errors_count": len(jsonld_obs["errors"]),
-                   "types": sorted(set(flat["facts"].get("types", [])))},
-        "fact_summary": fact_result["summary"],
-        "fact_matrix": fact_result["matrix"],
+        "jsonld": {
+            "objects_count": len(jsonld_obs.get("objects", [])),
+            "errors_count": len(jsonld_obs.get("errors", [])),
+            "types": sorted(set(flat.get("facts", {}).get("types", []))),
+        },
+        "fact_summary": fact_result.get("summary", {}),
+        "fact_matrix": fact_result.get("matrix", []),
     }
+
+    # Layer 9: Rule Engine & Finding Generation
     findings = apply_rules(signals)
+
     timings["total_s"] = round(time.time() - t0, 3)
-    return {"signals": signals, "findings": findings, "timings": timings}
+
+    return {
+        "status": "success" if http_obs.get("status") == 200 else "failed",
+        "url": url,
+        "http": http_obs,
+        "waf": blockade,
+        "robots": robots_obs,
+        "sitemap": sitemap_obs,
+        "raw_extraction": raw_text,
+        "json_ld": jsonld_obs.get("objects", []),
+        "extracted_facts": flat.get("facts", {}),
+        "rendering": {
+            "needed": render,
+            "executed": bool(render_obs.get("ok")),
+            "word_count": rendered_text.get("word_count", 0),
+            "extracted_facts": (
+                extract_text(rendered_html) if rendered_html else {}
+            ),
+        },
+        "fact_comparison": fact_result,
+        "signals": signals,
+        "findings": findings,
+        "timings": timings,
+        "error": http_obs.get("error"),
+    }
