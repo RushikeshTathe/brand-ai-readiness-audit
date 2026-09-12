@@ -4,7 +4,7 @@ Single-page crawl-render audit pipeline.
 Implements the research flow (README Section 8):
   URL -> direct HTTP -> WAF/HTTP gate -> robots.txt policy
       -> raw HTML extraction -> target-fact check -> JSON-LD extraction
-      -> browser rendering -> raw vs rendered comparison
+      -> browser rendering (if facts not already resolved) -> raw vs rendered comparison
       -> target-fact comparison -> finding generation
 
 Usage:
@@ -92,12 +92,32 @@ def audit_url(
     flat = flatten_fact_values(jsonld_obs.get("objects", []))
     timings["jsonld_s"] = round(time.time() - t, 3)
 
+    # Pre-render Target Fact Resolution Check:
+    # If target_facts are provided and ALL are already found in raw HTML or JSON-LD,
+    # Playwright rendering is not required to resolve facts.
+    pre_render_facts_resolved = False
+    if target_facts:
+        pre_fact_result = compare_facts(
+            target_facts,
+            raw_text["text"],
+            flat.get("text_blob", ""),
+            rendered_text=None,
+            semantic_match=semantic_match,
+        )
+        matrix = pre_fact_result.get("matrix", [])
+        if matrix and all(
+            (item.get("in_raw") or item.get("found_raw") or item.get("raw_found"))
+            or (item.get("in_jsonld") or item.get("found_jsonld") or item.get("jsonld_found"))
+            for item in matrix
+        ):
+            pre_render_facts_resolved = True
+
     # Layer 7: Browser Client-side Rendering (Playwright Execution)
     rendered_html: Optional[str] = None
     render_obs: Dict[str, Any] = {"ok": False, "error": "render-skipped"}
     rendered_text: Dict[str, Any] = {"text": "", "word_count": 0, "char_count": 0}
 
-    if render and not blockade.get("blocked"):
+    if render and not blockade.get("blocked") and not pre_render_facts_resolved:
         t = time.time()
         render_obs = render_url(
             http_obs.get("final_url") or url,
@@ -107,10 +127,17 @@ def audit_url(
         timings["render_s"] = round(time.time() - t, 3)
 
         if render_obs.get("ok"):
-            rendered_html = render_obs.get("rendered_html", "")
-            rendered_text = extract_text(rendered_html or "")
+            raw_rendered = render_obs.get("rendered_html")
+            rendered_html = (
+                str(raw_rendered)
+                if raw_rendered and not isinstance(raw_rendered, str)
+                else (raw_rendered or "")
+            )
+            rendered_text = extract_text(rendered_html)
     elif blockade.get("blocked"):
         render_obs = {"ok": False, "error": "render-skipped-blockade"}
+    elif pre_render_facts_resolved:
+        render_obs = {"ok": False, "error": "render-skipped-facts-resolved"}
 
     # Expansion calculation (Raw vs Rendered Text Comparison)
     expansion = (
@@ -186,7 +213,7 @@ def audit_url(
         "json_ld": jsonld_obs.get("objects", []),
         "extracted_facts": flat.get("facts", {}),
         "rendering": {
-            "needed": render,
+            "needed": render and not pre_render_facts_resolved,
             "executed": bool(render_obs.get("ok")),
             "word_count": rendered_text.get("word_count", 0),
             "extracted_facts": (
