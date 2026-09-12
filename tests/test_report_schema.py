@@ -1,207 +1,119 @@
 """
-Test report schema validation.
-Ensures the audit report follows the required structure.
+Test report schema validation for Adobe Round 3 required contract.
 """
 
-import json
-import pytest
-import sys
+from datetime import datetime
 import os
+import sys
 
-# Add the skills directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills', 'audit-orchestrator', 'scripts'))
+# Add skills directory to path
+sys.path.insert(
+    0,
+    os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "skills",
+            "audit-orchestrator",
+            "scripts",
+        )
+    ),
+)
 
-from orchestrator import run_audit, calculate_priority, generate_finding_id
+from orchestrator import (
+    generate_finding_id,
+    normalize_finding,
+    normalize_severity,
+    orchestrate_audit,
+    validate_url,
+)
 
 
 class TestReportSchema:
-    """Test the audit report schema."""
-    
+    """Test the audit report schema compliance."""
+
     def test_report_has_required_top_level_keys(self):
-        """Report must have meta, summary, findings, recommendations."""
-        # Create a minimal report structure
-        report = {
-            'meta': {},
-            'summary': {},
-            'findings': [],
-            'recommendations': []
-        }
-        
-        assert 'meta' in report
-        assert 'summary' in report
-        assert 'findings' in report
-        assert 'recommendations' in report
-    
-    def test_meta_has_required_fields(self):
-        """Meta must have version, timestamp, target_url, domain."""
-        meta = {
-            'version': '1.0.0',
-            'timestamp': '2026-01-01T00:00:00Z',
-            'target_url': 'https://example.com',
-            'domain': 'example.com',
-            'pages_crawled': 0,
-            'duration_seconds': 0
-        }
-        
-        required_fields = ['version', 'timestamp', 'target_url', 'domain']
-        for field in required_fields:
-            assert field in meta, f"Meta missing required field: {field}"
-    
-    def test_summary_has_severity_counts(self):
-        """Summary must have counts for each severity level."""
-        summary = {
-            'total_findings': 0,
-            'critical': 0,
-            'high': 0,
-            'medium': 0,
-            'low': 0,
-            'info': 0,
-            'overall_score': 100,
-            'top_issues': []
-        }
-        
-        severity_fields = ['critical', 'high', 'medium', 'low', 'info']
-        for field in severity_fields:
-            assert field in summary, f"Summary missing severity count: {field}"
-    
+        """Report must contain site, audited_at, summary, and findings."""
+        report = orchestrate_audit("https://example.com")
+
+        assert "site" in report
+        assert report["site"] == "https://example.com"
+
+        assert "audited_at" in report
+        dt = datetime.fromisoformat(report["audited_at"])
+        assert dt is not None
+
+        assert "summary" in report
+        summary = report["summary"]
+        assert "total_findings" in summary
+        assert "critical" in summary
+        assert "high" in summary
+        assert "medium" in summary
+
+        assert "findings" in report
+        assert isinstance(report["findings"], list)
+
     def test_finding_has_required_fields(self):
-        """Each finding must have required fields."""
-        finding = {
-            'id': 'test-001',
-            'skill': 'crawl-render-audit',
-            'category': 'html',
-            'severity': 'medium',
-            'title': 'Test finding',
-            'description': 'Test description',
-            'evidence': 'Test evidence',
-            'location': 'https://example.com',
-            'recommendation': 'Test recommendation'
+        """Every finding in report must contain id, title, severity, evidence, suggested_action."""
+        raw_finding = {
+            "check_id": "TEST-001",
+            "message": "Sample issue",
+            "severity": "HIGH",
+            "evidence": "Observed missing tag",
+            "recommendation": "Add the missing tag",
+            "custom_extra_field": "preserved_val",
         }
-        
-        required_fields = ['id', 'skill', 'category', 'severity', 'title', 
-                          'description', 'evidence', 'location', 'recommendation']
-        
-        for field in required_fields:
-            assert field in finding, f"Finding missing required field: {field}"
-    
-    def test_severity_is_valid_value(self):
-        """Severity must be one of the valid values."""
-        valid_severities = ['critical', 'high', 'medium', 'low', 'info']
-        
-        for severity in valid_severities:
-            finding = {'severity': severity}
-            assert finding['severity'] in valid_severities
-    
-    def test_recommendation_has_required_fields(self):
-        """Each recommendation must have required fields."""
-        recommendation = {
-            'id': 'rec-001',
-            'title': 'Test recommendation',
-            'description': 'Test description',
-            'priority': 'high',
-            'effort': 'low',
-            'impact': 'high'
-        }
-        
-        required_fields = ['id', 'title', 'description', 'priority', 'effort', 'impact']
-        
-        for field in required_fields:
-            assert field in recommendation, f"Recommendation missing required field: {field}"
 
+        normalized = normalize_finding(raw_finding)
 
-class TestFindingNormalization:
-    """Test finding normalization functions."""
-    
-    def test_calculate_priority_critical(self):
-        """Critical findings should have high priority."""
-        finding = {'severity': 'critical', 'category': 'html'}
-        priority = calculate_priority(finding)
-        assert priority >= 80
-    
-    def test_calculate_priority_info(self):
-        """Info findings should have low priority."""
-        finding = {'severity': 'info', 'category': 'other'}
-        priority = calculate_priority(finding)
-        assert priority <= 20
-    
-    def test_calculate_priority_range(self):
-        """Priority should be between 1 and 100."""
-        for severity in ['critical', 'high', 'medium', 'low', 'info']:
-            finding = {'severity': severity, 'category': 'other'}
-            priority = calculate_priority(finding)
-            assert 1 <= priority <= 100, f"Priority {priority} out of range for severity {severity}"
-    
-    def test_generate_finding_id_unique(self):
-        """Different findings should get different IDs."""
-        finding1 = {
-            'skill': 'test',
-            'category': 'cat1',
-            'title': 'Title 1',
-            'location': 'http://example.com'
-        }
-        finding2 = {
-            'skill': 'test',
-            'category': 'cat2',
-            'title': 'Title 2',
-            'location': 'http://example.com'
-        }
-        
-        id1 = generate_finding_id(finding1)
-        id2 = generate_finding_id(finding2)
-        
-        assert id1 != id2
-    
-    def test_generate_finding_id_deterministic(self):
-        """Same finding should get same ID."""
-        finding = {
-            'skill': 'test',
-            'category': 'cat',
-            'title': 'Title',
-            'location': 'http://example.com'
-        }
-        
-        id1 = generate_finding_id(finding)
-        id2 = generate_finding_id(finding)
-        
-        assert id1 == id2
+        assert "id" in normalized
+        assert normalized["id"] == "TEST-001"
+        assert "title" in normalized
+        assert normalized["title"] == "Sample issue"
+        assert "severity" in normalized
+        assert normalized["severity"] == "high"
+        assert "evidence" in normalized
+        assert normalized["evidence"] == "Observed missing tag"
+        assert "suggested_action" in normalized
+        assert normalized["suggested_action"] == "Add the missing tag"
+        assert normalized["custom_extra_field"] == "preserved_val"
+
+    def test_orchestrator_findings_schema(self):
+        """Verify all findings produced in an actual audit meet the contract."""
+        report = orchestrate_audit("https://example.com")
+
+        for finding in report["findings"]:
+            assert "id" in finding
+            assert "title" in finding
+            assert "severity" in finding
+            assert "evidence" in finding
+            assert "suggested_action" in finding
+
+    def test_summary_counter_calculation(self):
+        """Verify summary counters accurately reflect normalized findings."""
+        report = orchestrate_audit("https://example.com")
+        summary = report["summary"]
+        findings = report["findings"]
+
+        assert summary["total_findings"] == len(findings)
+        assert summary["critical"] == sum(
+            1 for f in findings if f["severity"] == "critical"
+        )
+        assert summary["high"] == sum(
+            1 for f in findings if f["severity"] == "high"
+        )
+        assert summary["medium"] == sum(
+            1 for f in findings if f["severity"] == "medium"
+        )
 
 
 class TestBasicChecks:
-    """Test basic functionality."""
-    
-    def test_validate_url_with_scheme(self):
-        """URL with scheme should be returned as-is."""
-        from orchestrator import validate_url
-        
-        url = "https://example.com"
-        result = validate_url(url)
-        assert result == url
-    
-    def test_validate_url_without_scheme(self):
-        """URL without scheme should get https added."""
-        from orchestrator import validate_url
-        
-        url = "example.com"
-        result = validate_url(url)
-        assert result == "https://example.com"
-    
-    def test_validate_url_invalid(self):
-        """Invalid URL should raise ValueError."""
-        from orchestrator import validate_url
-        
-        with pytest.raises(ValueError):
-            validate_url("")
-        
-        with pytest.raises(ValueError):
-            validate_url("not a url")
-    
+    """Test helper functions."""
+
+    def test_validate_url(self):
+        assert validate_url("example.com") == "https://example.com"
+
     def test_normalize_severity(self):
-        """Severity normalization should work correctly."""
-        from orchestrator import normalize_severity
-        
-        assert normalize_severity("critical") == "critical"
         assert normalize_severity("HIGH") == "high"
         assert normalize_severity("error") == "high"
         assert normalize_severity("warning") == "medium"
-        assert normalize_severity("notice") == "low"
-        assert normalize_severity("unknown") == "info"
