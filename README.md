@@ -1,176 +1,183 @@
-# Brand AI Readiness Audit
+# 🔍 Brand AI Readiness Audit — Agent Skill Marketplace
 
-A portable Agent Skill Marketplace that audits websites for AI discoverability and on-site engagement problems.
+![Adobe Hackathon](https://img.shields.io/badge/ADOBE_HACKATHON-2026-lightgrey)
+![Round 3](https://img.shields.io/badge/ROUND_3-SUBMISSION-red)
+![Python](https://img.shields.io/badge/PYTHON-3.10+-blue)
+![Format](https://img.shields.io/badge/FORMAT-agentskills.io-green)
+![Safety](https://img.shields.io/badge/READ--ONLY-SAFE-blue)
+![License](https://img.shields.io/badge/LICENSE-MIT-yellow)
 
-## Overview
+---
 
-This tool accepts a public website URL/domain and inspects it for:
+## 📌 Executive Summary
 
-1. **AI Discoverability Problems** - Can machines find and understand your content?
-2. **On-site Engagement Problems** - Can visitors quickly understand and act?
+AI assistants (ChatGPT, Perplexity, Claude, Google AI Overviews) increasingly answer questions by fetching, reading, and citing pages directly — not by matching keywords. When a page's key facts are locked behind client-side JavaScript, missing from structured data, blocked by an AI-specific `robots.txt` rule, or contradicted across the web, that brand becomes invisible or misrepresented to the systems now mediating discovery.
 
-The marketplace is **read-only** - it never modifies the target website.
+Existing tools cover only pieces of this: SEO auditors check tags but don't understand LLM rendering; AI-visibility trackers show *where* a brand is missing but not *why*; UX tools measure behavior but not machine readability. None connect an off-site discoverability failure to its on-site root cause with actual evidence.
 
-## Installation
+**Brand AI Readiness Audit** is an Agent Skill Marketplace, in the [agentskills.io](https://agentskills.io) format, that audits any public website — one it has never seen — for both halves of the problem:
+
+1. **AI Discoverability** — can an automated crawler reach the page, and can it extract the actual facts (not just detect that a page exists)?
+2. **On-site Engagement** — once a visitor lands, can they orient immediately and find a next action?
+
+Every finding carries concrete evidence and a stated mechanism (*why* this affects retrieval or engagement), not a generic score.
+
+---
+
+## 🏗️ Architecture
+
+```
+                              URL
+                               │
+                               ▼
+                  ┌────────────────────────┐
+                  │   audit-orchestrator    │   ← entrypoint
+                  │  (composes all skills)  │
+                  └────────────┬────────────┘
+                               │
+              ┌────────────────┼────────────────────┐
+              ▼                ▼                     ▼
+   ┌─────────────────┐ ┌───────────────────┐ ┌──────────────────┐
+   │ crawl-render-    │ │ freshness-        │ │ engagement-audit │
+   │ audit            │ │ corroboration     │ │                  │
+   │                  │ │                   │ │                  │
+   │ HTTP/edge access │ │ entity identity   │ │ first-screen     │
+   │ robots.txt (AI   │ │ cross-page        │ │ orientation      │
+   │  bot directives) │ │  consistency      │ │ navigation       │
+   │ raw HTML facts   │ │ freshness signals │ │ call-to-action   │
+   │ JSON-LD fallback │ │                   │ │  clarity         │
+   │ rendered facts   │ │                   │ │                  │
+   └────────┬─────────┘ └─────────┬─────────┘ └────────┬─────────┘
+            └────────────────────┬┴────────────────────┘
+                                  ▼
+                normalize → deduplicate → severity summary
+                                  │
+                                  ▼
+                  final report (site, audited_at,
+                     summary, findings[])
+```
+
+`crawl-render-audit` runs first; its output (raw HTML, extracted text, JSON-LD facts, rendering result) is shared with the other two skills so the page is only fetched once.
+
+| Skill | What it checks | Why it matters |
+|---|---|---|
+| **audit-orchestrator** *(entrypoint)* | Coordinates all skills, normalizes findings, emits the final report | Single point of composition — the only skill an agent needs to invoke |
+| **crawl-render-audit** | HTTP/WAF access, AI-bot-specific `robots.txt` rules, raw HTML vs. JSON-LD vs. rendered fact comparison | Layer 1 of the problem: can a machine even reach and read the fact? |
+| **freshness-corroboration** | Entity identity signals, cross-page consistency, stale-content detection | Layer 2: is the fact current, unambiguous, and internally consistent? |
+| **engagement-audit** | First-screen orientation, navigation, CTA clarity | The other half of Round 3: does a visitor who *does* arrive stay? |
+
+---
+
+## ⚙️ Installation
 
 ```bash
 pip install -r requirements.txt
+
+# Optional — only needed for the JS-rendering check.
+# This downloads the Chromium binary to Playwright's own cache;
+# it is NOT part of this repo and should never be bundled into the submission zip.
+playwright install chromium
 ```
 
-## Usage
+If Chromium isn't installed, rendering is skipped gracefully — the pipeline falls back to raw-HTML + JSON-LD analysis rather than failing.
 
-### Command Line
+## ▶️ Usage
+
+### Command line
 
 ```bash
 python skills/audit-orchestrator/scripts/orchestrator.py https://example.com
 ```
 
-Options:
-- `--max-pages N`: Maximum pages to crawl (default: 20)
-- `--max-depth N`: Maximum crawl depth (default: 2)
-- `--timeout N`: Request timeout in seconds (default: 10)
-- `--delay N`: Delay between requests in seconds (default: 1.0)
-- `--output PATH`: Output file path
+| Option | Description |
+|---|---|
+| `--output PATH` / `-o PATH` | Write the JSON report to a specific file (default: auto-named `audit_report_<domain>_<timestamp>.json`) |
 
-### Python API
+### Python
 
 ```python
-from skills.audit_orchestrator.scripts.orchestrator import run_audit
+import sys, os
+sys.path.insert(0, os.path.join("skills", "audit-orchestrator", "scripts"))
+sys.path.insert(0, os.path.join("skills", "crawl-render-audit", "scripts"))
+sys.path.insert(0, os.path.join("skills", "freshness-corroboration", "scripts"))
+sys.path.insert(0, os.path.join("skills", "engagement-audit", "scripts"))
+
+from orchestrator import run_audit
 
 report = run_audit("https://example.com")
 ```
 
-## How this tool browses the network
+Skill folders use hyphens per the agentskills.io convention, so they aren't importable as a normal Python package path — each `scripts/` directory is added to `sys.path` directly, as shown above and in `demo_audit.py`.
 
-This is the key thing your team should understand: **the tool does the browsing, not the person running it.** When you (or your CI pipeline) run the script, the requests go out from *your* machine to the website you're auditing. This is read-only network access — the tool never writes to or changes the target site.
+---
 
-### What does the network layer actually do?
+## 📄 Output
 
-1. **Sends HTTP GET requests.** The crawler (`crawler.py`) uses the Python `requests` library to fetch pages. A GET request is exactly what your browser does when you type a URL — it asks the server for a page and receives the HTML back. The tool never uses POST/PUT/DELETE, never submits forms, and never touches authenticated (logged-in) areas.
-
-2. **Identifies itself.** Every request includes a `User-Agent` header: `"BrandAuditBot/1.0"`. This tells the website "I am an automated auditor" so site operators can distinguish it from a human visitor or from malicious bots.
-
-3. **Downloads then parses.** Once it gets the raw HTML, it parses it with `BeautifulSoup` to read things like the title, meta descriptions, headings, links, images, and structured data — without ever interacting with the page's JavaScript.
-
-4. **Follows internal links.** It reads the links on each page and queues up the ones pointing to the *same domain*, so it can visit a few more relevant pages. By default it visits up to 20 pages, 2 levels deep.
-
-### How it stays safe and polite
-
-| Rule | Why |
-|------|-----|
-| **Read-only (GET only)** | It can never modify the target website |
-| **Respects `robots.txt`** | It reads the site's robots.txt first and will not access any path the site blocks |
-| **Same-domain only** | It never wanders to external sites — it only follows links within the domain being audited |
-| **Delay between requests** | A built-in delay (default 1s) throttles it so it doesn't hammer the server |
-| **Configurable limits** | `max_pages`, `max_depth`, `timeout`, and `delay` caps keep it conservative |
-| **Loop prevention** | Tracks already-visited URLs and drops duplicates (fragments, tracking params like `utm_*`, `index.html`) so it doesn't crawl in circles |
-
-### Where the network access actually happens
-
-The browsing happens **on your machine at runtime** — it is *not* done by an external service or by an AI agent. If you run the orchestrator locally, your machine makes the requests. If you run it in CI/cloud, that machine makes the requests. The only external thing that ever happens is the standard HTTP request sent to, and the response received from, the audited website.
-
-## Architecture
-
-```
-URL
- ↓
-Validate & normalize URL
- ↓
-Crawl/inspection (read-only HTTP)
- ↓
-Shared audit context
- ↓
-Specialized skills
- ↓
-Findings
- ↓
-Orchestrator
- ↓
-Final JSON report
-```
-
-### Shared audit context
-
-The most important design decision: all three skills share **one** crawl result instead of each skill re-downloading the website. The orchestrator crawls once, then builds a shared `audit_context` that every skill reads from. This keeps the network load low (one crawl, multiple analyses) and guarantees all skills see the same data.
+Matches the required schema (`site`, `audited_at`, `summary`, `findings[]` with `id`/`title`/`severity`/`evidence`/`suggested_action`), plus extra fields for transparency:
 
 ```json
 {
-  "site": { "input_url", "normalized_url", "final_url", "domain" },
-  "robots": { ... },
-  "sitemap": { ... },
-  "pages": [ ... ],
-  "links": [ ... ],
-  "structured_data": [ ... ],
-  "metadata": [ ... ]
-}
-```
-
-### Skills
-
-1. **audit-orchestrator** (entrypoint) - Coordinates all skills and produces the final report
-2. **crawl-render-audit** - Inspects HTTP accessibility, robots.txt, sitemaps, HTML, and structured data
-3. **freshness-corroboration** - Detects inconsistencies and outdated content
-4. **engagement-audit** - Evaluates orientation, navigation, and calls-to-action
-
-## Output
-
-The audit produces a structured JSON report:
-
-```json
-{
-  "meta": {
-    "version": "1.0.0",
-    "timestamp": "ISO-8601",
-    "duration_seconds": 0,
-    "target_url": "https://example.com",
-    "pages_crawled": 0
-  },
+  "site": "https://example.com",
+  "audited_at": "2026-09-13T09:05:06.05Z",
   "summary": {
-    "total_findings": 0,
-    "critical": 0,
-    "high": 0,
+    "total_findings": 10,
+    "critical": 2,
+    "high": 5,
     "medium": 0,
-    "low": 0,
-    "info": 0,
-    "overall_score": 0,
-    "top_issues": []
+    "low": 3,
+    "info": 0
   },
-  "findings": [],
-  "recommendations": []
+  "findings": [
+    {
+      "id": "ACCESS-001",
+      "title": "Edge access blockade prevents automated retrieval",
+      "severity": "critical",
+      "evidence": { "status": 403, "kind": "http-block", "signals": ["..."] },
+      "suggested_action": "Allow automated audit traffic or provide an accessible mirror...",
+      "mechanism": "HTTP edge controls stop the retrieval chain before any content layer can be evaluated.",
+      "priority": 1,
+      "confidence": "high"
+    }
+  ],
+  "meta": { "target_url": "https://example.com", "duration_seconds": 0.09 },
+  "details": { "crawl_render": {}, "freshness": [], "engagement": [] }
 }
 ```
 
-## Findings
+`meta` and `details` are additive context; `summary` and every finding always carry the required fields.
 
-Each finding includes:
-- **id**: Unique identifier
-- **skill**: Which skill detected it
-- **category**: Category of issue
-- **severity**: critical, high, medium, low, or info
-- **title**: Brief description
-- **description**: Detailed explanation
-- **evidence**: Concrete evidence
-- **location**: Where it was found
-- **recommendation**: How to fix it
+---
 
-## Testing
+## ✅ Testing
 
 ```bash
 pytest tests/
 ```
 
-## Configuration
+70 tests, including regression cases against four real counterexamples that shaped the rules:
 
-Default settings are conservative and directly control how much the tool browses the network:
+| Site | What it tests |
+|---|---|
+| Dot & Key | Large DOM expansion + price in JSON-LD → no false CSR failure |
+| Healthline | Strong raw HTML + AI-bot `robots.txt` block → policy fires independently of HTML quality |
+| Nordstrom | 403/WAF blockade → network access checked before diagnosing JS dependency |
+| Saraswat Bank | Rendered growth, but fact already in a static HTML table → no false positive |
 
-| Setting | Default | Controls |
-|---------|---------|----------|
-| `max_pages` | 20 | Max pages fetched over the network |
-| `max_depth` | 2 | How deep it follows internal links |
-| `delay` | 1.0s | Pause between requests (rate limiting) |
-| `timeout` | 10s | How long to wait for each response |
-| `user_agent` | `BrandAuditBot/1.0` | Identifier sent with each request |
+---
 
-These can be configured via command-line flags or the Python API, and they keep the browsing conservative so the audited site is never overwhelmed.
+## 🔒 Safety & Scope
+
+- **Read-only** — GET requests only; no login, no form submission, no state-changing action against any target site
+- Respects `robots.txt`
+- Rendering is timeboxed, sandboxed to a single page load, and skipped entirely under an access blockade
+- No pretrained model weights bundled; no browser binaries in this repo (see Installation)
+
+## 🚫 What we explicitly don't claim
+
+- No universal threshold — the JS-expansion rule is a screening signal only, never a pass/fail verdict on its own
+- SPAs are not assumed invisible to every AI system, nor is JSON-LD assumed to solve every discoverability gap
+- `robots.txt` permission is not treated as a guarantee of indexing or retrieval
+
+---
 
 ## Team Shastra Stack

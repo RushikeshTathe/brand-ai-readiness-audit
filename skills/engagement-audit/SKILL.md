@@ -1,3 +1,9 @@
+---
+name: engagement-audit
+description: Audits what happens after a visitor lands on a page - whether the page orients them immediately (clear heading, tagline, value proposition), offers a clear next action, and has working navigation. Use this skill to diagnose why visitors who do arrive at a site don't stay or convert.
+license: MIT
+---
+
 # Engagement Audit Skill
 
 ## Purpose

@@ -1,3 +1,9 @@
+---
+name: crawl-render-audit
+description: Audits whether a website's important facts can actually be reached and read by automated/AI crawlers - checking HTTP/edge accessibility, robots.txt directives for AI bots, raw HTML content, JSON-LD structured data fallback, and raw-vs-rendered JavaScript dependency. Use this skill to diagnose why AI systems can't find or extract facts from a site.
+license: MIT
+---
+
 # Crawl / Render Audit Skill
 
 ## Purpose

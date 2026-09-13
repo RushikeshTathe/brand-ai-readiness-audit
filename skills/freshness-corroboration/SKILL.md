@@ -1,3 +1,9 @@
+---
+name: freshness-corroboration
+description: Audits whether a website's key facts are current, internally consistent, and unambiguously tied to a single identifiable entity - detecting stale dates/claims, cross-page inconsistencies, and missing entity-identity signals. Use this skill to diagnose why AI assistants might cite outdated or confused information about a brand.
+license: MIT
+---
+
 # Freshness / Corroboration Skill
 
 ## Purpose

@@ -12,13 +12,6 @@ from urllib.parse import urlparse
 def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
     """
     Analyze first-screen orientation signals.
-    
-    Args:
-        soup: BeautifulSoup object
-        url: Page URL
-        
-    Returns:
-        Dictionary with orientation analysis
     """
     orientation = {
         'has_h1': False,
@@ -41,13 +34,11 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
     
     # Check for subheading (H2 or large text near H1)
     if h1:
-        # Look for H2 immediately after H1
         h2 = soup.find('h2')
         if h2:
             orientation['has_subheading'] = True
             orientation['subheading_text'] = h2.get_text(strip=True)
         else:
-            # Look for large paragraph or span near H1
             next_elements = h1.find_all_next(['p', 'span'], limit=3)
             for elem in next_elements:
                 text = elem.get_text(strip=True)
@@ -57,7 +48,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
                     break
     
     # Check for value proposition in visible text
-    # Look for common value proposition patterns
     value_patterns = [
         r'we (?:help|enable|provide|offer|deliver)',
         r'the (?:best|leading|top|#1)',
@@ -67,7 +57,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
         r'(?:free|instant|quick)',
     ]
     
-    # Get visible text (excluding script/style)
     for script in soup(['script', 'style']):
         script.decompose()
     
@@ -76,7 +65,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
     for pattern in value_patterns:
         if re.search(pattern, visible_text, re.IGNORECASE):
             orientation['has_value_proposition'] = True
-            # Try to extract the sentence
             sentences = re.split(r'[.!?]+', visible_text)
             for sentence in sentences:
                 if re.search(pattern, sentence, re.IGNORECASE):
@@ -91,7 +79,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
         r'(?:see|view|explore|discover)',
     ]
     
-    # Look for buttons and links with CTA-like text
     buttons = soup.find_all(['button', 'a', 'input'], class_=re.compile(r'btn|button|cta', re.IGNORECASE))
     buttons.extend(soup.find_all('a', string=re.compile(r'(?:get|start|try|sign up|learn more|contact|buy|shop)', re.IGNORECASE)))
     
@@ -99,7 +86,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
         orientation['has_primary_cta'] = True
         orientation['primary_cta_text'] = buttons[0].get_text(strip=True)
     else:
-        # Check for any links with CTA-like text
         links = soup.find_all('a', href=True)
         for link in links:
             text = link.get_text(strip=True)
@@ -112,7 +98,7 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
                 break
     
     # Check for navigation
-    nav = soup.find('nav') or soup.find(class_=re.compile(r'nav|menu', re.IGNORECASE))
+    nav = soup.find(['nav', 'header']) or soup.find(class_=re.compile(r'nav|menu|header', re.IGNORECASE))
     if nav:
         orientation['has_navigation'] = True
     
@@ -134,14 +120,7 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
 
 def analyze_navigation(soup: BeautifulSoup, url: str) -> Dict:
     """
-    Analyze navigation structure.
-    
-    Args:
-        soup: BeautifulSoup object
-        url: Page URL
-        
-    Returns:
-        Dictionary with navigation analysis
+    Analyze navigation structure across standard and modern accessibility patterns.
     """
     navigation = {
         'has_nav_element': False,
@@ -152,78 +131,76 @@ def analyze_navigation(soup: BeautifulSoup, url: str) -> Dict:
         'has_search': False,
         'mobile_friendly': False
     }
-    
-    # Check for nav element
-    nav = soup.find('nav')
-    if nav:
+
+    # 1. Search for explicit navigation containers, ARIA roles, and semantic structures
+    nav_elements = soup.find_all(['nav', 'header', 'aside'])
+    nav_elements.extend(
+        soup.find_all(attrs={'role': re.compile(r'navigation|banner', re.IGNORECASE)})
+    )
+    nav_elements.extend(
+        soup.find_all(class_=re.compile(r'nav|menu|header|sidebar', re.IGNORECASE))
+    )
+    nav_elements.extend(
+        soup.find_all(id=re.compile(r'nav|menu|header|sidebar', re.IGNORECASE))
+    )
+    nav_elements.extend(
+        soup.find_all(attrs={'aria-label': re.compile(r'nav|navigation|menu', re.IGNORECASE)})
+    )
+
+    collected_links = []
+    seen_hrefs = set()
+
+    for container in nav_elements:
+        links = container.find_all('a', href=True)
+        for link in links:
+            href = link.get('href')
+            text = link.get_text(strip=True)
+            if href and href not in seen_hrefs and len(text) > 0:
+                seen_hrefs.add(href)
+                collected_links.append({'text': text, 'href': href})
+
+    if collected_links:
         navigation['has_nav_element'] = True
-        links = nav.find_all('a', href=True)
-        navigation['nav_links'] = [
-            {
-                'text': link.get_text(strip=True),
-                'href': link.get('href')
-            }
-            for link in links
-        ]
-        navigation['nav_link_count'] = len(links)
-    
-    # Check for navigation-like classes
-    if not navigation['has_nav_element']:
-        nav_classes = soup.find_all(class_=re.compile(r'nav|menu', re.IGNORECASE))
-        for nav_elem in nav_classes:
-            links = nav_elem.find_all('a', href=True)
-            if links:
-                navigation['has_nav_element'] = True
-                navigation['nav_links'] = [
-                    {
-                        'text': link.get_text(strip=True),
-                        'href': link.get('href')
-                    }
-                    for link in links
-                ]
-                navigation['nav_link_count'] = len(links)
-                break
-    
-    # Check footer navigation
-    footer = soup.find('footer') or soup.find(class_='footer')
+        navigation['nav_links'] = collected_links
+        navigation['nav_link_count'] = len(collected_links)
+
+    # 2. Check footer navigation
+    footer = soup.find('footer') or soup.find(class_=re.compile(r'footer', re.IGNORECASE))
     if footer:
         footer_links = footer.find_all('a', href=True)
         if footer_links:
             navigation['has_footer_nav'] = True
             navigation['footer_links'] = [
-                {
-                    'text': link.get_text(strip=True),
-                    'href': link.get('href')
-                }
+                {'text': link.get_text(strip=True), 'href': link.get('href')}
                 for link in footer_links
             ]
-    
-    # Check for search functionality
-    search = soup.find('input', attrs={'type': 'search'}) or \
-             soup.find('input', attrs={'name': 'q'}) or \
-             soup.find('input', attrs={'name': 'search'}) or \
-             soup.find(class_=re.compile(r'search', re.IGNORECASE))
+
+    # 3. Check for search functionality (broadened for ARIA, forms, buttons, and placeholders)
+    search = (
+        soup.find('input', attrs={'type': 'search'})
+        or soup.find('input', attrs={'name': re.compile(r'q|search', re.IGNORECASE)})
+        or soup.find(attrs={'role': 'search'})
+        or soup.find(attrs={'role': 'searchbox'})
+        or soup.find('form', attrs={'action': re.compile(r'search', re.IGNORECASE)})
+        or soup.find(attrs={'aria-label': re.compile(r'search', re.IGNORECASE)})
+        or soup.find('input', attrs={'placeholder': re.compile(r'search', re.IGNORECASE)})
+        or soup.find(['button', 'a'], string=re.compile(r'search', re.IGNORECASE))
+        or soup.find(class_=re.compile(r'search', re.IGNORECASE))
+    )
     if search:
         navigation['has_search'] = True
-    
-    # Check viewport for mobile friendliness
+
+    # 4. Check viewport for mobile friendliness
     viewport = soup.find('meta', attrs={'name': 'viewport'})
     if viewport:
         navigation['mobile_friendly'] = True
-    
+
     return navigation
 
 
 def detect_orientation_issues(orientation: Dict, url: str) -> List[Dict]:
     """
     Detect orientation issues.
-    
-    Args:
-        orientation: Orientation analysis dictionary
-        url: Page URL
-        
-    Returns:
-        List of findings
     """
     findings = []
     
@@ -285,13 +262,6 @@ def detect_orientation_issues(orientation: Dict, url: str) -> List[Dict]:
 def detect_navigation_issues(navigation: Dict, url: str) -> List[Dict]:
     """
     Detect navigation issues.
-    
-    Args:
-        navigation: Navigation analysis dictionary
-        url: Page URL
-        
-    Returns:
-        List of findings
     """
     findings = []
     
@@ -300,7 +270,7 @@ def detect_navigation_issues(navigation: Dict, url: str) -> List[Dict]:
             'id': 'engage-005',
             'skill': 'engagement-audit',
             'category': 'navigation',
-            'severity': 'critical',
+            'severity': 'high',  # Updated from critical to high
             'title': 'No navigation found',
             'description': 'Website lacks navigation structure',
             'evidence': 'No nav element or navigation classes found',
@@ -365,18 +335,8 @@ def detect_navigation_issues(navigation: Dict, url: str) -> List[Dict]:
 def check_broken_navigation_links(navigation: Dict, url: str) -> List[Dict]:
     """
     Check for broken navigation links.
-    
-    Args:
-        navigation: Navigation analysis dictionary
-        url: Page URL
-        
-    Returns:
-        List of findings
     """
     findings = []
-    
-    # This is a basic check - in a real implementation, you'd actually verify links
-    # For now, we'll just check for obviously broken patterns
     
     all_links = navigation.get('nav_links', []) + navigation.get('footer_links', [])
     
@@ -384,7 +344,6 @@ def check_broken_navigation_links(navigation: Dict, url: str) -> List[Dict]:
         href = link.get('href', '')
         text = link.get('text', '')
         
-        # Check for obviously broken links
         if href in ['#', '#!', 'javascript:void(0)', 'javascript:;']:
             findings.append({
                 'id': 'engage-010',
@@ -407,17 +366,9 @@ def analyze_engagement(
 ) -> Tuple[Dict, List[Dict]]:
     """
     Analyze engagement across the website.
-    
-    Args:
-        context: Audit context with page data
-        existing_findings: Findings from other skills
-        
-    Returns:
-        Tuple of (updated context, new findings)
     """
     new_findings = []
     
-    # Analyze each page
     for page in context.get('pages', []):
         html = page.get('html', '')
         url = page.get('url', '')
@@ -427,28 +378,22 @@ def analyze_engagement(
         
         soup = BeautifulSoup(html, 'lxml')
         
-        # Analyze orientation
         orientation = analyze_orientation(soup, url)
         page['orientation'] = orientation
         
-        # Detect orientation issues
         orientation_issues = detect_orientation_issues(orientation, url)
         new_findings.extend(orientation_issues)
         
-        # Analyze navigation
         navigation = analyze_navigation(soup, url)
         page['navigation'] = navigation
         
-        # Detect navigation issues
         navigation_issues = detect_navigation_issues(navigation, url)
         new_findings.extend(navigation_issues)
         
-        # Check for broken navigation links
         broken_links = check_broken_navigation_links(navigation, url)
         new_findings.extend(broken_links)
     
-    # Store summary in context
-    if context['pages']:
+    if context.get('pages'):
         primary_page = context['pages'][0]
         context['engagement_summary'] = {
             'orientation_score': primary_page.get('orientation', {}).get('orientation_score', 0),

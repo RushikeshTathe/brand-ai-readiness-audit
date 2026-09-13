@@ -1,3 +1,9 @@
+---
+name: audit-orchestrator
+description: Entrypoint skill for the brand AI-readiness audit marketplace. Accepts a website URL, invokes the crawl-render-audit, freshness-corroboration, and engagement-audit skills, then normalizes, deduplicates, and composes their findings into the single required audit report (site, audited_at, summary, findings). Use this skill when asked to audit a website for AI discoverability or on-site engagement problems.
+license: MIT
+---
+
 # Audit Orchestrator Skill
 
 ## Purpose
