@@ -23,7 +23,7 @@ sys.path.insert(
     ),
 )
 
-from audit import audit_url
+from audit import audit_url  # type: ignore
 
 SITES = [
     "https://example.com",
@@ -50,7 +50,7 @@ def test_raw_only_runtime_within_budget(site):
 def test_render_runtime_timeboxed():
     """Single render measurement; skipped gracefully without browser binaries."""
     pytest.importorskip("playwright")
-    from renderer import render_url
+    from renderer import render_url  # type: ignore
 
     started = time.time()
     out = render_url("https://example.com", timeout_s=25)

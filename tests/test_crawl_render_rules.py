@@ -14,11 +14,11 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills', 'crawl-render-audit', 'scripts'))
 
-from rules import apply_rules
-from ai_robots import check_ai_access, parse_robots_txt
-from waf_detector import detect_blockade
-from facts import compare_facts
-from text_extract import extract_text, expansion_stats
+from rules import apply_rules  # type: ignore
+from ai_robots import check_ai_access, parse_robots_txt  # type: ignore
+from waf_detector import detect_blockade  # type: ignore
+from facts import compare_facts  # type: ignore
+from text_extract import extract_text, expansion_stats  # type: ignore
 
 
 def _base_signals(**over):

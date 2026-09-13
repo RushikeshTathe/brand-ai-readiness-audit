@@ -11,8 +11,10 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills', 'audit-orchestrator', 'scripts'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills', 'crawl-render-audit', 'scripts'))
 
-from orchestrator import validate_url
-from crawler import normalize_url, get_domain, is_same_domain, CrawlerConfig
+from bs4 import BeautifulSoup
+from orchestrator import validate_url  # type: ignore
+from crawler import normalize_url, get_domain, is_same_domain, CrawlerConfig  # type: ignore
+from page_analysis import analyze_html_structure  # type: ignore
 
 
 class TestUrlValidation:
@@ -180,9 +182,6 @@ class TestHtmlAnalysis:
     
     def test_analyze_html_structure(self):
         """HTML structure analysis should extract key elements."""
-        from bs4 import BeautifulSoup
-        from page_analysis import analyze_html_structure
-        
         html = """
         <!DOCTYPE html>
         <html lang="en">
@@ -215,9 +214,6 @@ class TestHtmlAnalysis:
     
     def test_missing_title_detected(self):
         """Missing title should be detected."""
-        from bs4 import BeautifulSoup
-        from page_analysis import analyze_html_structure
-        
         html = "<html><body><h1>Content</h1></body></html>"
         soup = BeautifulSoup(html, 'lxml')
         analysis = analyze_html_structure(soup, "https://example.com")
@@ -227,9 +223,6 @@ class TestHtmlAnalysis:
     
     def test_images_without_alt(self):
         """Images without alt text should be counted."""
-        from bs4 import BeautifulSoup
-        from page_analysis import analyze_html_structure
-        
         html = """
         <html><body>
             <img src="img1.jpg" alt="Has alt">

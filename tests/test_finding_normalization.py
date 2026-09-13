@@ -10,7 +10,7 @@ import os
 # Add the skills directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'skills', 'audit-orchestrator', 'scripts'))
 
-from orchestrator import (
+from orchestrator import (  # type: ignore
     normalize_severity,
     deduplicate_findings,
     calculate_priority,

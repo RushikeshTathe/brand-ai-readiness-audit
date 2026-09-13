@@ -20,7 +20,7 @@ sys.path.insert(
     ),
 )
 
-from orchestrator import (
+from orchestrator import (  # type: ignore
     generate_finding_id,
     normalize_finding,
     normalize_severity,

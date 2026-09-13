@@ -21,17 +21,49 @@ crawl_render_path = os.path.join(SKILLS_DIR, "crawl-render-audit", "scripts")
 freshness_path = os.path.join(SKILLS_DIR, "freshness-corroboration", "scripts")
 engagement_path = os.path.join(SKILLS_DIR, "engagement-audit", "scripts")
 
-if crawl_render_path not in sys.path:
-    sys.path.insert(0, crawl_render_path)
-if freshness_path not in sys.path:
-    sys.path.insert(0, freshness_path)
-if engagement_path not in sys.path:
-    sys.path.insert(0, engagement_path)
+for p in [crawl_render_path, freshness_path, engagement_path]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 # Direct imports from the added script paths
-from audit import audit_url
-from consistency import analyze_freshness_consistency
-from engagement import analyze_engagement
+try:
+    from audit import audit_url  # type: ignore
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("audit", os.path.join(crawl_render_path, "audit.py"))
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["audit"] = _mod
+        _spec.loader.exec_module(_mod)
+        audit_url = getattr(_mod, "audit_url")
+    else:
+        raise
+
+try:
+    from consistency import analyze_freshness_consistency  # type: ignore
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("consistency", os.path.join(freshness_path, "consistency.py"))
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["consistency"] = _mod
+        _spec.loader.exec_module(_mod)
+        analyze_freshness_consistency = getattr(_mod, "analyze_freshness_consistency")
+    else:
+        raise
+
+try:
+    from engagement import analyze_engagement  # type: ignore
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("engagement", os.path.join(engagement_path, "engagement.py"))
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules["engagement"] = _mod
+        _spec.loader.exec_module(_mod)
+        analyze_engagement = getattr(_mod, "analyze_engagement")
+    else:
+        raise
 
 
 def get_domain(url: str) -> str:
