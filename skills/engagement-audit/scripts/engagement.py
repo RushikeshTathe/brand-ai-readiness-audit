@@ -117,7 +117,6 @@ def analyze_orientation(soup: BeautifulSoup, url: str) -> Dict:
     
     return orientation
 
-
 def analyze_navigation(soup: BeautifulSoup, url: str) -> Dict:
     """
     Analyze navigation structure across standard and modern accessibility patterns.
@@ -153,49 +152,109 @@ def analyze_navigation(soup: BeautifulSoup, url: str) -> Dict:
     for container in nav_elements:
         links = container.find_all('a', href=True)
         for link in links:
-            href = link.get('href')
+            href = link.get('href', '').strip()
             text = link.get_text(strip=True)
+
             if href and href not in seen_hrefs and len(text) > 0:
                 seen_hrefs.add(href)
-                collected_links.append({'text': text, 'href': href})
+                collected_links.append({
+                    'text': text,
+                    'href': href
+                })
 
     if collected_links:
         navigation['has_nav_element'] = True
         navigation['nav_links'] = collected_links
         navigation['nav_link_count'] = len(collected_links)
 
+    # Whole-page fallback for modern SPAs using hashed/CSS-module class names
+    if navigation['nav_link_count'] < 3:
+        body = soup.find('body') or soup
+        body_links = body.find_all('a', href=True)
+
+        distinct = {}
+
+        for link in body_links:
+            href = link.get('href', '').strip()
+            text = link.get_text(strip=True)
+
+            if (
+                href
+                and text
+                and href not in distinct
+                and not href.startswith('#')
+                and not href.startswith('javascript:')
+            ):
+                distinct[href] = text
+
+        if len(distinct) >= navigation['nav_link_count']:
+            navigation['nav_link_count'] = len(distinct)
+            navigation['nav_links'] = [
+                {'text': text, 'href': href}
+                for href, text in distinct.items()
+            ]
+
+            if navigation['nav_link_count'] > 0:
+                navigation['has_nav_element'] = True
+
     # 2. Check footer navigation
-    footer = soup.find('footer') or soup.find(class_=re.compile(r'footer', re.IGNORECASE))
+    footer = soup.find('footer') or soup.find(
+        class_=re.compile(r'footer', re.IGNORECASE)
+    )
+
     if footer:
         footer_links = footer.find_all('a', href=True)
+
         if footer_links:
             navigation['has_footer_nav'] = True
             navigation['footer_links'] = [
-                {'text': link.get_text(strip=True), 'href': link.get('href')}
+                {
+                    'text': link.get_text(strip=True),
+                    'href': link.get('href')
+                }
                 for link in footer_links
             ]
 
-    # 3. Check for search functionality (broadened for ARIA, forms, buttons, and placeholders)
+    # 3. Check for search functionality
     search = (
         soup.find('input', attrs={'type': 'search'})
-        or soup.find('input', attrs={'name': re.compile(r'q|search', re.IGNORECASE)})
+        or soup.find(
+            'input',
+            attrs={'name': re.compile(r'q|search', re.IGNORECASE)}
+        )
         or soup.find(attrs={'role': 'search'})
         or soup.find(attrs={'role': 'searchbox'})
-        or soup.find('form', attrs={'action': re.compile(r'search', re.IGNORECASE)})
-        or soup.find(attrs={'aria-label': re.compile(r'search', re.IGNORECASE)})
-        or soup.find('input', attrs={'placeholder': re.compile(r'search', re.IGNORECASE)})
-        or soup.find(['button', 'a'], string=re.compile(r'search', re.IGNORECASE))
-        or soup.find(class_=re.compile(r'search', re.IGNORECASE))
+        or soup.find(
+            'form',
+            attrs={'action': re.compile(r'search', re.IGNORECASE)}
+        )
+        or soup.find(
+            attrs={'aria-label': re.compile(r'search', re.IGNORECASE)}
+        )
+        or soup.find(
+            'input',
+            attrs={'placeholder': re.compile(r'search', re.IGNORECASE)}
+        )
+        or soup.find(
+            ['button', 'a'],
+            string=re.compile(r'search', re.IGNORECASE)
+        )
+        or soup.find(
+            class_=re.compile(r'search', re.IGNORECASE)
+        )
     )
+
     if search:
         navigation['has_search'] = True
 
     # 4. Check viewport for mobile friendliness
     viewport = soup.find('meta', attrs={'name': 'viewport'})
+
     if viewport:
         navigation['mobile_friendly'] = True
 
     return navigation
+
 
 
 def detect_orientation_issues(orientation: Dict, url: str) -> List[Dict]:
